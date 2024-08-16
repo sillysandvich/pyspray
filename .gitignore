@@ -1,3 +1,5 @@
 TF2_DIRECTORY.txt
 .venv
-__pycache__/
+**/__pycache__/
+src/pyspray.egg-info
+dist/

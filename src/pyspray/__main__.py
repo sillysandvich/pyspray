@@ -4,9 +4,9 @@ import sys
 
 import click
 
-import image_fetching
-import vmt
-import vtf
+from . import image_fetching
+from . import vmt
+from . import vtf
 
 #TODO: Refactor to eliminate repeated code
 @click.group()
