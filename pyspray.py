@@ -8,20 +8,6 @@ import image_fetching
 import vmt
 import vtf
 
-#Set the current spray to the generated spray by modifying settings cfg file 
-#TODO: find some way to modify current spray in game memory, not just in cfg file
-def set_current_spray(file_name: str) -> None:
-    config_file = os.path.join("tf", "cfg", "config.cfg")
-    with open(config_file, "r+") as config:
-        data = config.read()
-        vtf_path_start = data.find("cl_logofile ") + len("cl_logofile ")
-        vtf_path_end = data.find("\n", vtf_path_start)
-        new_vtf_path = f'"materials/vgui/logos/{file_name}.vtf"'
-        new_data = data[:vtf_path_start] + new_vtf_path + data[vtf_path_end:]
-
-        config.seek(0)
-        config.write(new_data)
-        config.truncate() 
 #TODO: Refactor to eliminate repeated code
 @click.group()
 def cli():
@@ -102,7 +88,7 @@ def static(source, format, preserve_aspect_ratio, name):
                 vtf.TextureFlags.NOLOD |\
                 vtf.TextureFlags.EIGHTBITALPHA |\
                 vtf.TextureFlags.NOMIP 
-    static_spray = vtf.AnimatedSpray([first_frame], vtf.ImageFormats.from_name(format.upper()), flags, preserve_aspect_ratio)
+    static_spray = vtf.AnimatedSpray([first_frame], vtf.ImageFormats.from_name(format), flags, preserve_aspect_ratio)
     spray_path = os.path.join(tf2_directory, "tf", "materials", "vgui", "logos", f"{name}.vtf")
     static_spray.save(spray_path)
     vmt.write_vmt_files(name, tf2_directory)

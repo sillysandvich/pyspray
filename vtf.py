@@ -19,6 +19,7 @@ class ImageFormats(enum.Enum):
         return obj
     @classmethod
     def from_name(cls, name):
+        name = name.upper()
         for member in cls.__members__.values():
             if member.name == name:
                 return member
