@@ -5,6 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pyspray"
 version = "0.0.4"
+author = "sillysandvich"
 authors = [
     {name = "sillysandvich", email = "teamfortress.stupid@gmail.com"}
 ]
