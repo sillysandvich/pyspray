@@ -13,16 +13,24 @@ from . import vtf
 def cli():
     pass
 
+def get_module_directory() -> str:
+    module_path = os.path.abspath(__file__)
+    module_dir = os.path.dirname(module_path)
+    return module_dir
 @cli.command(help = "Set TF2 directory.")
 @click.argument("tf2_dir", type = click.Path(exists = True))
 def set_directory(tf2_dir):
-    with open("TF2_DIRECTORY.txt", "wt") as file:
+    module_dir = get_module_directory()
+    tf2_dir_file = os.path.join(module_dir, "TF2_DIRECTORY.txt")
+    with open(tf2_dir_file, "wt") as file:
         file.write(tf2_dir)
 
 #TODO: ensure TF2_DIRECTORY.txt is always in the same folder as the script for neatness (default working directory not always proper with vscode)
-def get_tf2_directory() -> str | None:
+def get_tf2_directory() -> str:
     try: 
-        with open ("TF2_DIRECTORY.txt", "rt") as file:
+        module_dir = get_module_directory()
+        tf2_dir_file = os.path.join(module_dir, "TF2_DIRECTORY.txt")
+        with open (tf2_dir_file, "rt") as file:
             return file.read()
     except FileNotFoundError:
         raise FileNotFoundError("TF2 directory not configured! Please run pyspray set-directory before using the script!")
