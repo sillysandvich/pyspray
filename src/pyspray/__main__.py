@@ -25,7 +25,6 @@ def set_directory(tf2_dir):
     with open(tf2_dir_file, "wt") as file:
         file.write(tf2_dir)
 
-#TODO: ensure TF2_DIRECTORY.txt is always in the same folder as the script for neatness (default working directory not always proper with vscode)
 def get_tf2_directory() -> str:
     try: 
         module_dir = get_module_directory()
