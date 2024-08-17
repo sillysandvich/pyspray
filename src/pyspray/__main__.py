@@ -3,14 +3,11 @@ import os.path
 import sys
 
 import click
-"""
+
 from . import image_fetching
 from . import vmt
 from . import vtf
-"""
-import image_fetching
-import vmt
-import vtf
+
 #TODO: Refactor to eliminate repeated code
 @click.group()
 def cli():
