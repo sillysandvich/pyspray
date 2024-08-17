@@ -3,11 +3,14 @@ import os.path
 import sys
 
 import click
-
+"""
 from . import image_fetching
 from . import vmt
 from . import vtf
-
+"""
+import image_fetching
+import vmt
+import vtf
 #TODO: Refactor to eliminate repeated code
 @click.group()
 def cli():
@@ -36,13 +39,13 @@ def get_tf2_directory() -> str:
         raise FileNotFoundError("TF2 directory not configured! Please run pyspray set-directory before using the script!")
 
 
-source_option = click.option("-s", "--source", required = True, type = str, help = "The filepath or url of the image/animation. Filepaths are checked before attempting url retrieval.")
+source_argument = click.argument("source", type = str)
 format_option = click.option("-f", "--format", type = click.Choice([format.name for format in vtf.ImageFormats if format.implemented], case_sensitive = False), default = "DXT5", help = "The format in which the spray is encoded.")
 aspect_ratio_flag = click.option("--preserve_aspect_ratio/--no_preserve_aspect_ratio", is_flag = True, default = True, help = "Whether the aspect ratio of the image should be preserved. If true, the image will be padded to square using either transparent or black padding, determined by the image format's alpha support.")
 name_option = click.option("-n", "--name", type = str, help = "The name of the spray.")
 
-@cli.command(help = "Create an animated spray.")
-@source_option
+@cli.command(help = "Create an animated spray. Argument is a filepath or a url. Local filepaths are checked before attempting url retrieval.")
+@source_argument
 @format_option
 @aspect_ratio_flag
 @name_option
@@ -62,8 +65,8 @@ def anim(source, format, preserve_aspect_ratio, name, start_time, end_time, seco
     animated_spray.save(spray_path)
     vmt.write_vmt_files(name, tf2_directory)
 
-@cli.command(help = "Create a spray that changes with distance.")
-@click.option("-s", "--source", multiple = True, required = True, type = str, help = "The filepath or url of the image. Filepaths are checked before attempting url retrieval. The first source will be shown from furthest away, and the last source will be shown when you get closest to the spray.")
+@cli.command(help = "Create a spray that changes with distance. Arguments are filepaths or urls. Filepaths are checked before attempting url retrieval. The first source will be shown from furthest away, and the last source will be shown when you get closest to the spray." )
+@click.argument("source", nargs = -1, type = str)
 @format_option
 @aspect_ratio_flag
 @name_option
@@ -81,8 +84,8 @@ def fade(source, format, preserve_aspect_ratio, name):
     fade_spray.save(spray_path)
     vmt.write_vmt_files(name, tf2_directory)
 
-@cli.command(help = "Create a spray using a static image.")
-@source_option
+@cli.command(help = "Create a spray using a static image. Argument is a filepath or a url. Local filepaths are checked before attempting url retrieval.")
+@source_argument
 @format_option
 @aspect_ratio_flag
 @name_option
