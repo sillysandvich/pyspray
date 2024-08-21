@@ -258,7 +258,7 @@ class VTFFile:
             #NOTE: It looks like for some reason when dealing with 16 bit formats, the first channel is stored in the least significant bits?
             #NOTE: trim_channels_uint16 function accounts for this, but it is a weird implementation
             case ImageFormats.BGR565: #Tested, works
-                with img.convert("RGB") as converted, reorder_channels(img, "BGR") as reordered:
+                with img.convert("RGB") as converted, reorder_channels(converted, "BGR") as reordered:
                     return trim_channels_uint16(reordered, (5, 6, 5))       
             case ImageFormats.BGRX5551: #Tested, works
                 #Alpha data ignored by game engine, assumed to be 1 universally
