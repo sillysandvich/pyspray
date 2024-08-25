@@ -185,7 +185,7 @@ class VTFFile:
                 with img.convert("RGB") as converted:
                     #Not working, might be error with source engine?
                     #return trim_channels_uint16(converted, (5, 6, 5))
-                    raise ValueError("DXT1_ONEBITALPHA does not work, use DXT1 instead")
+                    raise ValueError("RGB565 does not work, use BGR565 instead")
             case ImageFormats.I8: #Tested, works
                 with img.convert("L") as converted:
                     return converted.tobytes()

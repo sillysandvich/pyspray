@@ -1,5 +1,6 @@
 import datetime
 import os.path
+import platform
 import sys
 
 import click
@@ -8,7 +9,6 @@ from . import image_fetching
 from . import vmt
 from . import vtf
 
-#TODO: Refactor to eliminate repeated code
 @click.group()
 def cli():
     pass
@@ -18,12 +18,16 @@ def get_module_directory() -> str:
     module_dir = os.path.dirname(module_path)
     return module_dir
 @cli.command(help = "Set TF2 directory.")
-@click.argument("tf2_dir", type = click.Path(exists = True))
-def set_directory(tf2_dir):
+@click.argument("tf2_directory", type = click.Path(exists = True, dir_okay = True, file_okay = False))
+def set_directory(tf2_directory):
+    #Check to make sure this actually the Team Fortress 2 directory by checking for the existance of the executable
+    executable_path = os.path.join(tf2_directory, "tf.exe") if platform.system() == "Windows" else os.path.join(tf2_directory, "tf2_linux")
+    if not os.path.exists(executable_path):
+        raise click.BadParameter("Team Fortress 2 executable not detected, this is not the Team Fortress 2 directory!")
     module_dir = get_module_directory()
-    tf2_dir_file = os.path.join(module_dir, "TF2_DIRECTORY.txt")
-    with open(tf2_dir_file, "wt") as file:
-        file.write(tf2_dir)
+    tf2_directory_file = os.path.join(module_dir, "TF2_DIRECTORY.txt")
+    with open(tf2_directory_file, "wt") as file:
+        file.write(tf2_directory)
 
 def get_tf2_directory() -> str:
     try: 
@@ -32,7 +36,11 @@ def get_tf2_directory() -> str:
         with open (tf2_dir_file, "rt") as file:
             return file.read()
     except FileNotFoundError:
-        raise FileNotFoundError("TF2 directory not configured! Please run pyspray set-directory before using the script!")
+        raise click.UsageError("TF2 directory not configured! Please run pyspray set-directory before generating any sprays!")
+
+def ensure_spray_directories(tf2_directory: str):
+    ui_dir = os.path.join(tf2_directory, "tf", "materials", "vgui", "logos", "ui")
+    os.makedirs(ui_dir, exist_ok = True)
 
 
 source_argument = click.argument("source", type = str)
@@ -50,6 +58,7 @@ name_option = click.option("-n", "--name", type = str, help = "The name of the s
 @click.option("-spf", "--seconds_per_frame", type = float, default = 0.2, help = "The number of seconds in between each frame of the animation. The default value is the same framerate as natively possessed by sprays, so any change will speed up or slow down the animation.")
 def anim(source, format, preserve_aspect_ratio, name, start_time, end_time, seconds_per_frame):
     tf2_directory = get_tf2_directory()
+    ensure_spray_directories(tf2_directory)
     images = image_fetching.get_images(source, seconds_per_frame, start_time, end_time)
     flags =     vtf.TextureFlags.CLAMPS |\
                 vtf.TextureFlags.CLAMPT |\
@@ -68,6 +77,7 @@ def anim(source, format, preserve_aspect_ratio, name, start_time, end_time, seco
 @name_option
 def fade(source, format, preserve_aspect_ratio, name):
     tf2_directory = get_tf2_directory()
+    ensure_spray_directories(tf2_directory)
     images = [image_fetching.get_images(path)[0] for path in source]
     name = name or datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
 
@@ -87,6 +97,7 @@ def fade(source, format, preserve_aspect_ratio, name):
 @name_option
 def static(source, format, preserve_aspect_ratio, name):
     tf2_directory = get_tf2_directory()
+    ensure_spray_directories(tf2_directory)
     images = image_fetching.get_images(source)
     first_frame = images[0]
     name = name or datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
