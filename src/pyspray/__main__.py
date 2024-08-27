@@ -21,7 +21,8 @@ def get_module_directory() -> str:
 @click.argument("tf2_directory", type = click.Path(exists = True, dir_okay = True, file_okay = False))
 def set_directory(tf2_directory):
     #Check to make sure this actually the Team Fortress 2 directory by checking for the existance of the executable
-    executable_path = os.path.join(tf2_directory, "tf.exe") if platform.system() == "Windows" else os.path.join(tf2_directory, "tf2_linux")
+    executable_name = "tf_win64.exe" if platform.system() == "Windows" else "tf_linux64"
+    executable_path = os.path.join(tf2_directory, executable_name) 
     if not os.path.exists(executable_path):
         raise click.BadParameter("Team Fortress 2 executable not detected, this is not the Team Fortress 2 directory!")
     module_dir = get_module_directory()
