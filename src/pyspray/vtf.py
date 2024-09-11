@@ -100,8 +100,6 @@ class TextureFlags(enum.Flag):
     UNUSED_40000000 = 0x40000000
     UNUSED_80000000 = 0x80000000
 
-from time import time
-
 class VTFFile:
     @dataclass(kw_only=True)
     class VTFHeader:
