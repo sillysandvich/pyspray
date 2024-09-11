@@ -47,7 +47,7 @@ def ensure_spray_directories(tf2_directory: str):
 source_argument = click.argument("source", type = str)
 format_option = click.option("-f", "--format", type = click.Choice([format.name for format in vtf.ImageFormats if format.implemented], case_sensitive = False), default = "DXT5", help = "The format in which the spray is encoded.")
 aspect_ratio_flag = click.option("--preserve_aspect_ratio/--no_preserve_aspect_ratio", is_flag = True, default = True, help = "Whether the aspect ratio of the image should be preserved. If true, the image will be padded to square using either transparent or black padding, determined by the image format's alpha support.")
-dry_run_flag = click.option("--dry/--no_dry", is_flag = True, default = False, help = "If enabled, spray files will not be generated. Best for previewing how a spray might look with specifc options. Implies show")
+dry_run_flag = click.option("--dry/--no_dry", is_flag = True, default = False, help = "If enabled, spray files will not be generated. Best for previewing how a spray might look with specifc options.")
 show_flag = click.option("--show/--no_show", is_flag = True, default = False, help = "If enabled, a preview of the spray will be shown. Best used if you want to preview a spray while also generating files.")
 name_option = click.option("-n", "--name", type = str, help = "The name of the spray.", default = lambda : datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
 
