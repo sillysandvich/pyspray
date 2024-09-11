@@ -3,3 +3,4 @@ TF2_DIRECTORY.txt
 **/__pycache__/
 src/pyspray.egg-info
 dist/
+Test_Images

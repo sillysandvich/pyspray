@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import enum
 import functools
+import io
 import math
 import struct
 from typing import ClassVar
@@ -8,6 +9,8 @@ from typing import ClassVar
 import numpy
 from PIL import Image
 from quicktex import dds, s3tc
+
+from .gif_display import show_gif
 
 class ImageFormats(enum.Enum):
     def __new__(cls, value: int, bits_per_pixel: int, block_side_length: int, implemented: bool):
@@ -97,9 +100,12 @@ class TextureFlags(enum.Flag):
     UNUSED_40000000 = 0x40000000
     UNUSED_80000000 = 0x80000000
 
+from time import time
+
 class VTFFile:
     @dataclass(kw_only=True)
     class VTFHeader:
+        STRUCT_FORMAT_STRING: ClassVar[str] = "=4s2IIHHIHH4s3f4sfiBiBBx"
         VTF_HEADER_BYTES: ClassVar[int] = 64
 
         secret_message: bytes = b"YIFFY:3c"
@@ -121,7 +127,7 @@ class VTFFile:
         bumpmap_scale: int = 0
         def tobytes(self) -> bytes:
             return struct.pack(
-            "=4s2IIHHIHH4s3f4sfiBiBBx", #format string
+            self.STRUCT_FORMAT_STRING,
             b"VTF\0", #signature
             self.major_version,
             self.minor_version,
@@ -140,26 +146,55 @@ class VTFFile:
             self.low_res_format.value,
             self.low_res_width,
             self.low_res_height,
-        ) 
+        )
+        @classmethod
+        def frombytes(cls: type, bytes: bytes):
+            header_object = object.__new__(cls)
+            unpacked_data = struct.unpack(cls.STRUCT_FORMAT_STRING, bytes)
+            header_object.signature = unpacked_data[0]
+            header_object.major_version = unpacked_data[1]
+            header_object.minor_version = unpacked_data[2]
+            header_object.header_size = unpacked_data[3]
+            header_object.high_res_width = unpacked_data[4]
+            header_object.high_res_height = unpacked_data[5]
+            header_object.flags = TextureFlags(unpacked_data[6])
+            header_object.num_frames = unpacked_data[7]
+            header_object.first_frame = unpacked_data[8]
+            header_object.secret_message = unpacked_data[9] + unpacked_data[13]
+            header_object.reflectivity_vector = unpacked_data[10:13]
+            header_object.bumpmap_scale = unpacked_data[14]
+            header_object.high_res_format = ImageFormats(unpacked_data[15])
+            header_object.num_mipmaps = unpacked_data[16]
+            header_object.low_res_format = ImageFormats(unpacked_data[17])
+            header_object.low_res_width = unpacked_data[18]
+            header_object.low_res_height = unpacked_data[19]  
+            return header_object 
+
     MAX_BYTES = 512 * 1024
     def __init__(self, **kwargs) -> None:
         self.header = self.VTFHeader(**kwargs)
         self.high_res_data = numpy.empty((self.header.num_mipmaps, self.header.num_frames), dtype='object')
         self.low_res_data = Image.new("RGBA", (0,0))
-
     @staticmethod
-    def get_raw_image_data(img: Image.Image, format: ImageFormats) -> bytes:
-        def reorder_channels(img: Image.Image, order: str) -> bytes:
+    def reorder_channels(img: Image.Image, order: str, inverse: bool = False) -> Image.Image:
             channels = img.split()
             band_names = img.getbands()
-            indices = tuple(band_names.index(channel) for channel in order)
+            indices = [band_names.index(channel) for channel in order]
+            #Undo the reordering specified by the order string, indices patterns are not necessarily their own inverse so this is necessary
+            if inverse:
+                new_indices = [None for _ in indices]
+                for pos, index in enumerate(indices):
+                    new_indices[index] = pos
+                indices = new_indices
             ordered_channels = tuple(channels[index] for index in indices)
             reordered_image = Image.merge(img.mode, ordered_channels)
             for channel in ordered_channels:
                 channel.close()
             return reordered_image
+    @staticmethod
+    def get_raw_image_data(img: Image.Image, format: ImageFormats) -> bytes:
         #NOTE: FIRST channel is stored in the LEAST significant bits
-        def trim_channels_uint16(img: Image.Image, channel_depths: tuple[int, ...]):
+        def trim_channels_uint16(img: Image.Image, channel_depths: tuple[int, ...]) -> bytes:
             assert sum(channel_depths) == 16, "channel depths do not sum to 16 bits!"
             eight_bit_color_array = numpy.asarray(img)
             #Bitshift each channel such that all most significant bits fit within bit depth
@@ -167,7 +202,7 @@ class VTFFile:
             #Take bitwise or of each channel, shifted by appropriate amount
             trimmed_data = functools.reduce(lambda x, y: x | y, (trimmed_array[:, :, idx] << sum(channel_depths[:idx]) for idx in range(len(channel_depths))))
             return trimmed_data.tobytes()     
-        
+        reorder_channels = __class__.reorder_channels
         match format:
             case ImageFormats.RGBA8888: #Tested, works
                 with img.convert("RGBA") as converted:
@@ -275,6 +310,116 @@ class VTFFile:
             case _:
                 raise ValueError(f"Unimplemented Data Format: {format}")
         return ret
+    @staticmethod 
+    def get_image_from_raw_data(image_bytes: bytes, format: ImageFormats, width: int, height: int) -> Image.Image:
+        reorder_channels = __class__.reorder_channels
+        def extract_image_array_from_uint16(image_bytes: bytes, channel_depths: tuple[int, ...], width: int, height: int) -> numpy.ndarray:
+            assert sum(channel_depths) == 16, "channel depths do not sum to 16 bits!"
+            image_data_uint16 = numpy.frombuffer(image_bytes, dtype = numpy.uint16).reshape(height, width)
+
+            #TODO: Use different algorithm from simple zero-extension to reverse truncation such that values match those in-game as closely as possible
+            #Band-aid fix for one-bit values for now
+            channel_data_list = [image_data_uint16 >> sum(channel_depths[:idx]) << 8 - depth for idx, depth in enumerate(channel_depths)]
+            return numpy.stack(channel_data_list, dtype = numpy.uint8, axis = 2)
+    
+        #Early return for empty images to prevent quicktex from getting fussy
+        if width * height == 0:
+            return Image.new("RGBA", (0, 0))
+        match format:
+            case ImageFormats.RGBA8888:
+                return Image.frombytes("RGBA", (width, height), image_bytes)
+            case ImageFormats.ABGR8888:
+                with Image.frombytes("RGBA", (width, height), image_bytes) as img:
+                    return reorder_channels(img, "ABGR", True)
+            case ImageFormats.RGB888: 
+                return Image.frombytes("RGB", (width, height), image_bytes)
+            case ImageFormats.BGR888:
+                with Image.frombytes("RGB", (width, height), image_bytes) as img:
+                    return reorder_channels(img, "BGR", True)
+            case ImageFormats.RGB565:
+                image_array = extract_image_array_from_uint16(image_bytes, (5, 6, 5), width, height)
+                return Image.fromarray(image_array, "RGB")
+            case ImageFormats.I8:
+                return Image.frombytes("L", (width, height), image_bytes)
+            case ImageFormats.IA88:
+                return Image.frombytes("LA", (width, height), image_bytes)
+            case ImageFormats.A8:
+                image_data = numpy.zeros((height, width, 4), dtype = numpy.uint8)
+                image_data[:, :, 3] = numpy.frombuffer(image_bytes, dtype = numpy.uint8).reshape((height, width))
+                return Image.fromarray(image_data, "RGBA")
+            case ImageFormats.RGB888_BLUESCREEN | ImageFormats.BGR888_BLUESCREEN:
+                color_data = numpy.frombuffer(image_bytes, dtype = numpy.uint8).reshape((height, width, 3))
+                if format == ImageFormats.BGR888_BLUESCREEN:
+                    #Reorder to RGB ordering
+                    color_data = color_data.copy()
+                    color_data[:, :, [0, 2]] = color_data[:, :, [2, 0]]
+                is_blue = numpy.logical_and.reduce([color_data[:, :, 0] == 0, color_data[:, :, 1] == 0, color_data[:, :, 2] == 255])
+                #Blue is displayed as transparent
+                alpha_data = numpy.where(is_blue, 0, 255).astype(numpy.uint8)
+                image_data = numpy.concatenate((color_data, alpha_data[:, :, numpy.newaxis]), axis = 2)
+                return Image.fromarray(image_data, "RGBA")
+            case ImageFormats.ARGB8888:
+                with Image.frombytes("RGBA", (width, height), image_bytes) as img:
+                    return reorder_channels(img, "ARGB", True)
+            case ImageFormats.BGRA8888:
+                with Image.frombytes("RGBA", (width, height), image_bytes) as img:
+                    return reorder_channels(img, "BGRA", True)
+            case ImageFormats.DXT1:
+                texture = s3tc.bc1.BC1Texture.from_bytes(image_bytes, width, height)
+                decoder = s3tc.bc1.BC1Decoder()
+                texture = decoder.decode(texture)
+                return Image.frombuffer('RGBA', texture.size, texture)
+            case ImageFormats.DXT3:
+                color_bytes = b''.join(image_bytes[index:index + 8] for index in range(8, len(image_bytes), 16))
+                alpha_bytes = b''.join(image_bytes[index:index + 8] for index in range(0, len(image_bytes), 16))
+                alpha_array = numpy.frombuffer(alpha_bytes, dtype = numpy.uint8)
+                alpha_high_bit_array = alpha_array & 0b11110000
+                alpha_low_bit_array = (alpha_array & 0b00001111) << 4
+                alpha_array = numpy.empty(height * width, dtype = numpy.uint8)
+                alpha_array[0::2] = alpha_high_bit_array
+                alpha_array[1::2] = alpha_low_bit_array
+                alpha_array = alpha_array.reshape(height, width)
+                alpha_image = Image.fromarray(alpha_array, "L")
+
+                color_texture = s3tc.bc1.BC1Texture.from_bytes(color_bytes, width, height)
+                decoder = s3tc.bc1.BC1Decoder()
+                texture = decoder.decode(color_texture)
+                image = Image.frombuffer("RGBA", texture.size, texture)
+                image.putalpha(alpha_image)
+                return image
+            case ImageFormats.DXT5:
+                texture = s3tc.bc3.BC3Texture.from_bytes(image_bytes, width, height)
+                decoder = s3tc.bc3.BC3Decoder()
+                texture = decoder.decode(texture)
+                return Image.frombuffer('RGBA', texture.size, texture)
+            case ImageFormats.BGRX8888:
+                with Image.frombytes("RGBX", (width, height), image_bytes) as img:
+                    return reorder_channels(img, "BGRX", True)
+            case ImageFormats.BGR565: 
+                image_array = extract_image_array_from_uint16(image_bytes, (5, 6, 5), width, height)
+                with Image.fromarray(image_array, "RGB") as img:
+                    return reorder_channels(img, "BGR", True)      
+            case ImageFormats.BGRX5551:
+                image_array = extract_image_array_from_uint16(image_bytes, (5, 5, 5, 1), width, height)
+                with Image.fromarray(image_array, "RGBX") as img:
+                    return reorder_channels(img, "BGRX", True)  
+            case ImageFormats.BGRA4444:
+                image_array = extract_image_array_from_uint16(image_bytes, (4, 4, 4, 4), width, height)
+                with Image.fromarray(image_array, "RGBA") as img:
+                    return reorder_channels(img, "BGRA", True)  
+            case ImageFormats.DXT1_ONEBITALPHA:
+                raise ValueError("DXT1_ONEBITALPHA does not work, use DXT1 instead")
+            case ImageFormats.BGRA5551:
+                image_array = extract_image_array_from_uint16(image_bytes, (5, 5, 5, 1), width, height)
+                #Band-aid fix, one-bit values must be either 0 or 255
+                alpha_array = image_array[:, :, 3]
+                image_array[:, :, 3][alpha_array > 0] = 255
+                with Image.fromarray(image_array, "RGBA") as img:
+                    return reorder_channels(img, "BGRA", True)  
+            case _:
+                raise ValueError(f"Unimplemented Data Format: {format}")
+            
+
     @staticmethod
     def resize_image(image: Image.Image, side_length: int, preserve_aspect_ratio: bool):
         if preserve_aspect_ratio:
@@ -300,6 +445,32 @@ class VTFFile:
         high_res_bytes = [self.get_raw_image_data(img, self.header.high_res_format) for img in self.high_res_data.ravel()]
         file_data = b''.join(header_bytes + low_res_bytes + high_res_bytes)
         return file_data
+    #NOTE: only implemented for VTF 7.1 as of right now
+    @classmethod
+    def frombytes(cls: type, vtf_bytes: bytes) -> 'VTFFile':
+        vtf_data = io.BytesIO(vtf_bytes)  
+        vtf_object = object.__new__(cls)
+
+        header_bytes = vtf_data.read(cls.VTFHeader.VTF_HEADER_BYTES)
+        header = cls.VTFHeader.frombytes(header_bytes)
+
+        vtf_object.header = header
+        num_low_res_bytes = header.low_res_width * header.low_res_height * header.low_res_format.bits_per_pixel // 8
+        low_res_bytes = vtf_data.read(num_low_res_bytes)
+        vtf_object.low_res_data = cls.get_image_from_raw_data(low_res_bytes, header.low_res_format, header.low_res_width, header.low_res_height)
+
+        vtf_object.high_res_data = numpy.empty((header.num_mipmaps, header.num_frames), dtype = 'object')
+        for mipmap in range(header.num_mipmaps):
+            resize_factor = 2 ** (header.num_mipmaps - mipmap - 1) #Smallest mipmaps are first
+            mipmap_width = max(header.high_res_width // resize_factor,  1)
+            mipmap_height = max(header.high_res_height // resize_factor, 1)
+
+            bytes_per_frame = mipmap_width * mipmap_height * header.high_res_format.bits_per_pixel // 8
+            for frame in range(header.num_frames):
+                frame_bytes = vtf_data.read(bytes_per_frame)
+                vtf_object.high_res_data[mipmap, frame] = cls.get_image_from_raw_data(frame_bytes, header.high_res_format, mipmap_width, mipmap_height)
+        
+        return vtf_object
     def save(self, path) -> None:
         with open(path, "wb") as file:
             file.write(self.tobytes())
@@ -320,6 +491,8 @@ class VTFFile:
             mipmap_height = max(self.header.high_res_height // resize_factor, 1)
             for idx, frame in enumerate(mipmap):
                 mipmap[idx] = frame.resize((mipmap_width, mipmap_height))
+    def show(self) -> None:
+        raise NotImplementedError("VTFFile.show method only implemented on subclasses!")
 
 class FadeSpray(VTFFile):
     SMALLEST_MIPMAP_SIDE_LENGTH = 32
@@ -355,10 +528,19 @@ class FadeSpray(VTFFile):
             mipmap_side_length = self.SMALLEST_MIPMAP_SIDE_LENGTH * (2 ** idx)
             for idx2, frame in enumerate(mipmap):
                 mipmap[idx2] = self.resize_image(frame, mipmap_side_length, preserve_aspect_ratio)
+    def show(self) -> None:
+        with Image.new("RGBA", (self.header.high_res_width * self.header.num_mipmaps, self.header.high_res_height)) as image:
+            for idx, mipmap in enumerate(self.high_res_data[::-1]):
+                #For faded animated images, this would need to be changed
+                with mipmap[0].resize((self.header.high_res_width, self.header.high_res_height), resample = Image.NEAREST) as frame:
+                    image.paste(frame, (self.header.high_res_width * idx, 0))
+            image.show()
+
             
 
 
 class AnimatedSpray(VTFFile):
+    SECONDS_PER_FRAME = 0.2
     def calculate_frame_side_length(self) -> int:
         max_high_res_bits = self.calculate_max_high_res_bits()
         max_bits_per_frame = max_high_res_bits // self.header.num_frames
@@ -374,3 +556,8 @@ class AnimatedSpray(VTFFile):
         for idx, image in enumerate(images):
             images[idx] = self.resize_image(image, side_length, preserve_aspect_ratio)
         self.high_res_data[0, :] = images
+    def show(self) -> None:
+        frame_list = self.high_res_data[0, :]
+        show_gif(frame_list, frame_duration = self.SECONDS_PER_FRAME * 1000)
+        
+
